@@ -1,4 +1,4 @@
-Distributed Cache Example
+#Distributed Cache Example Hadoop 2.5#
 Author: gpoisoned
 Modified: Sep 23, 2014
 
