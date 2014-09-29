@@ -22,6 +22,10 @@ import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
 import org.apache.hadoop.conf.Configured;
 
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+import org.apache.commons.lang.StringUtils;
+
 public class Patent extends Configured implements Tool{
 
   public static class FirstMapper extends Mapper<Text, Text, Text, Text>{
@@ -93,7 +97,7 @@ public class Patent extends Configured implements Tool{
                 }
             }
             // Build the value string
-            outputValue = citedState + "," + citingPatent +"," + citingState;
+            outputValue = citedPatent + ","+ citedState + "," + citingPatent +"," + citingState;
             output = new Text (outputValue);
             String temp = citedPatent + ",";
             context.write(new Text(temp), output);
@@ -101,29 +105,97 @@ public class Patent extends Configured implements Tool{
     }
   }
 
+  // The schema of the input file for SecondMapper is:
+  // Cited, Cited State, Citing, Citing State
+  // The output of SecondMapper is:
+  // Citing State, Cited State
+  public static class SecondMapper extends Mapper<Object, Text, Text, Text>{
+    private Text outKey;
+    private Text outValue;
+    public void map(Object key, Text value, Context context
+                    ) throws IOException, InterruptedException {
+        String[] line = value.toString().split(",");
+        if (line.length == 5){
+            outKey = new Text(line[4]);
+            outValue = new Text(line[2]);
+            context.write(outKey, outValue);
+        }
+    }
+  }
+
+  public static class SecondReducer extends Reducer<Text, Text, Text, FloatWritable>{
+    private FloatWritable result = new FloatWritable();
+
+    public void reduce(Text key, Iterable<Text> values,
+                       Context context
+                       ) throws IOException, InterruptedException {
+        int total = 0;
+        int sameState = 0;
+        String keyStr = key.toString();
+        String vals  = "";
+        for (Text val : values) {
+            if (keyStr.equals(val.toString())){
+                // Found same state citation
+                sameState +=1;
+            }
+            total +=1;
+        }
+        float percent = (float) sameState / total;
+        result = new FloatWritable(percent);
+        context.write(key, result);
+    }
+  }
+
   @Override
   public int run(String[] args ) throws Exception {
-    Job job = new Job(getConf());
-    Configuration conf = job.getConfiguration();
-    job.setJobName("dist cache");
-
-    conf.set(KeyValueLineRecordReader.KEY_VALUE_SEPERATOR, ",");
-    conf.set("mapreduce.fieldsel.data.field.separator",",");
-    conf.set("mapreduce.fieldsel.map.output.key.value.fields.spec",
-         "1:0");
-
-    DistributedCache.addCacheFile(new URI("/user/user/cache/apat63_99.txt"),conf);
-    job.setJarByClass(Patent.class);
-
-    job.setInputFormatClass(KeyValueTextInputFormat.class);
-    job.setMapperClass(FirstMapper.class);
-    job.setMapOutputKeyClass(Text.class);
-    job.setMapOutputValueClass(Text.class);
-
-    FileInputFormat.addInputPath(job, new Path(args[0]));
-    FileOutputFormat.setOutputPath(job, new Path(args[1]));
     
-    boolean success = job.waitForCompletion(true);
+    Job chainJob = new Job(getConf());
+    Configuration chainConf = chainJob.getConfiguration();
+    chainJob.setJobName("dist-cache-multi-mapreduce");
+
+    String interDir = "intermediate-output";
+    FileSystem fs = FileSystem.get(chainConf);
+    Path interPath = new Path( interDir );
+    fs.delete(interPath, true); // recursive delete 
+    // fs.mkdirs(interPath); -- do no create, automatically created...
+
+    chainConf.set(KeyValueLineRecordReader.KEY_VALUE_SEPERATOR, ",");
+    chainConf.set("mapreduce.fieldsel.data.field.separator",",");
+    chainConf.set("mapreduce.fieldsel.map.output.key.value.fields.spec",
+         "1:0");
+    DistributedCache.addCacheFile(new URI("/user/user/cache/apat63_99.txt"),chainConf);
+
+    chainJob.setJarByClass(Patent.class); 
+    
+    chainJob.setInputFormatClass(KeyValueTextInputFormat.class);
+    chainJob.setMapperClass(FirstMapper.class);
+    chainJob.setMapOutputKeyClass(Text.class);
+    chainJob.setMapOutputValueClass(Text.class);
+
+    FileInputFormat.addInputPath(chainJob, new Path(args[0]));
+    FileOutputFormat.setOutputPath(chainJob, interPath);
+
+    boolean success;
+    success = chainJob.waitForCompletion(true);
+    if (success == false){
+        return 1;
+    }
+
+    Configuration secondChainConf = new Configuration();
+    Job secondChainJob = Job.getInstance(secondChainConf,
+                         "Second-map-reduce-job");
+    secondChainJob.setJarByClass(Patent.class);
+
+    secondChainJob.setMapperClass(SecondMapper.class);
+    secondChainJob.setReducerClass(SecondReducer.class);
+
+    secondChainJob.setOutputKeyClass(Text.class);
+    secondChainJob.setOutputValueClass(Text.class);
+
+    FileInputFormat.addInputPath(secondChainJob, interPath);
+    FileOutputFormat.setOutputPath(secondChainJob, new Path(args[1]));
+
+    success = secondChainJob.waitForCompletion(true);
     return success ? 0 : 1;
   }
 
