@@ -1,0 +1,31 @@
+Author: Jiwan Rana
+Email: jiwan.rana@colorado.edu
+Course: Data Center Scale Computing
+Professor: Dirk Grunwald
+
+****************************************************
+Assumptions:
+****************************************************
+- It is assumed that two patent files(apat63_99.txt and
+cite75_99.txt) are present in this directory that are not 
+included in this zipped file.
+
+****************************************************
+Helpers:
+****************************************************
+- A helper makefile is provided with this zipped file.
+ Running:
+	make prepare
+ will prepare the required directories and copy the files
+ to hadoop file system.
+
+ Also,
+   	make clean
+ will remove the directories
+
+****************************************************
+Output:
+****************************************************
+- The output of the program is stored at:
+   /user/user/output/output.csv in hdfs.
+
