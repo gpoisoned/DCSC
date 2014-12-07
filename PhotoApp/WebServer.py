@@ -5,6 +5,8 @@ import pickle
 import PIL
 import pika
 import hashlib
+import RedisHelper
+from flask import jsonify
 
 hostname= os.environ['RABBIT_HOST'] \
           if 'RABBIT_HOST' in os.environ else 'rabbitmq-server.local'
@@ -16,6 +18,11 @@ app = Flask(__name__)
 
 UPLOAD_FOLDER = '/tmp'
 ALLOWED_EXTENSIONS = set(['txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif'])
+
+redisByChecksum = RedisHelper('redis-server.local', 1)
+redisByName = RedisHelper('redis-server.local', 2)
+redisMD5ByLicense = RedisHelper('redis-server.local', 3)
+redisNameByLicense = RedisHelper('redis-server.local', 4)
 
 def allowed_file(filename):
     return '.' in filename and \
@@ -61,6 +68,30 @@ def scan():
             return '{"digest":"%s"}' % (digest)
         else:
             abort(403)
+
+@app.route("/licenses-by-md5/<checksum>", methods=['GET'])
+def get_licenses_using_md5(checksum):
+    dataList = redisByChecksum.getList(checksum)
+    # Build json response
+    return jsonify(md5 = checksum, licenses = dataList)
+
+@app.route("/licenses-by-name/<filename>", methods=['GET'])
+def get_licenses_using_name(filename):
+    dataList = redisByName.getList(filename)
+    # Build json response
+    return jsonify(filename = filename, licenses = dataList)
+
+@app.route("/name-by-license/<license>", methods=['GET'])
+def get_md5_by_license(license):
+    dataList = redisMD5ByLicense.getList(filename)
+    # Build json response
+    return jsonify(license = license, filenames = dataList)
+
+@app.route("/md5-by-license/<license>", methods=['GET'])
+def get_name_by_licenses(license):
+    dataList = redisNameByLicense.getList(filename)
+    # Build json response
+    return jsonify(license = license, filenames = dataList)
 
 if __name__ == "__main__":
     app.debug = True
