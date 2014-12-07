@@ -5,6 +5,7 @@ import GetLatLon
 import tempfile
 import PIL
 import pika
+import RedisHelper
 
 def imageType(filename):
     try:
@@ -20,14 +21,46 @@ def photoInfo(pickled):
     # You can print it out, but it is very long
     print "pickled item is ", len(pickled),"bytes"
     unpickled = pickle.loads(pickled)
-    print "File name was", unpickled[0], "digest is ", unpickled[1]
+    filename = unpickled[0]
+    digest = unpickled[1]
+    photo = unpickled[2]
+    print "File name was", filename, "digest is ", digest
     photoFile,photoName = tempfile.mkstemp("photo")
-    os.write(photoFile, unpickled[2])
+    os.write(photoFile, photo)
     os.close(photoFile)
     newPhotoName = photoName + '.' + imageType(photoName)
     os.rename(photoName, newPhotoName)
     print "Wrote it to ", newPhotoName
-    print "License:", ScanPlate.getLikelyLicense( newPhotoName )
+
+    licenses = ScanPlate.getLikelyLicense( newPhotoName )
+    print "License:", licences
+    # If found likely licenses, send to redis db
+    if licences:
+        redisByChecksum = RedisHelper('redis-server.local', 1)
+        if redisByChecksum.sendList(digest, licences):
+            print "Sucessfully saved to Redis Database - 1"
+        else:
+            print "Error: Something is wrong with the list provided"
+
+        redisByName = RedisHelper('redis-server.local', 2)
+        if redisByName.sendList(filename, licenses):
+            print "Sucessfully saved to Redis Database - 2"
+        else:
+            print "Error: Something is wrong with the list provided"
+
+        redisMD5ByLicense = RedisHelper('redis-server.local', 3)
+        redisNameByLicense = RedisHelper('redis-server.local', 4)
+        for licence in licences:
+            if redisMD5ByLicense.sendList(license, [digest]):
+                print "Sucessfully saved to Redis Database - 3"
+            else:
+                print "Error: Something is wrong with the list provided"
+
+            if redisNameByLicense.sendList(license, [filename]):
+                print "Sucessfully saved to Redis Database - 3"
+            else:
+                print "Error: Something is wrong with the list provided"
+
     print "GeoTag:", GetLatLon.getLatLon( newPhotoName )
     os.remove(newPhotoName)
 
